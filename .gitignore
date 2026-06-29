@@ -1,0 +1,6 @@
+.env
+xannn.db
+xannn.log
+__pycache__/
+*.pyc
+*.pyo
