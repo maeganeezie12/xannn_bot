@@ -190,7 +190,7 @@ async def trips_filter_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     filter_key = query.data.split("_")[1]
     text       = await _build_trips_text(filter_key)
-    await query.edit_message_text(text, reply_markup=_trips_keyboard(), parse_mode="Markdown")
+    await query.edit_message_text(text, parse_mode="Markdown")
 
 
 async def jointrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
