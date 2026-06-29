@@ -190,3 +190,32 @@ def normalize_username(username) -> str:
 def get_event_datetime(date_str: str, time_str: str):
     dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
     return SGT.localize(dt)
+
+
+# ── ICS calendar invite ───────────────────────────────────────────────────────
+
+def generate_ics(name: str, date_str: str, time_str: str, location: str = None, notes: str = None) -> bytes:
+    from icalendar import Calendar, Event as ICSEvent
+    import uuid
+
+    cal = Calendar()
+    cal.add("prodid", "-//XANNNBot//xannn//EN")
+    cal.add("version", "2.0")
+    cal.add("calscale", "GREGORIAN")
+
+    ev = ICSEvent()
+    ev.add("summary", name)
+    ev.add("uid", str(uuid.uuid4()))
+
+    dt_start = get_event_datetime(date_str, time_str)
+    dt_end   = dt_start + timedelta(hours=2)
+    ev.add("dtstart", dt_start)
+    ev.add("dtend",   dt_end)
+
+    if location:
+        ev.add("location", location)
+    if notes:
+        ev.add("description", notes)
+
+    cal.add_component(ev)
+    return cal.to_ical()

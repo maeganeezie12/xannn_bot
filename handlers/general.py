@@ -18,8 +18,9 @@ from database import (
     set_attendance,
     update_event_reminders,
 )
+import io
 from handlers.event import attendance_keyboard, build_event_card
-from utils import format_date, format_time, get_weekend_dates, normalize_username
+from utils import format_date, format_time, generate_ics, get_weekend_dates, normalize_username
 
 
 # ── /weekend ──────────────────────────────────────────────────────────────────
@@ -384,3 +385,20 @@ async def attendance_callback_handler(update: Update, context: ContextTypes.DEFA
         await query.edit_message_text(text=text, reply_markup=attendance_keyboard(event_id), parse_mode="Markdown")
     except Exception:
         pass
+
+    if status == "going":
+        try:
+            ics = generate_ics(
+                event["name"], event["date"], event["time"],
+                event.get("location"), event.get("notes"),
+            )
+            safe_name = event["name"].replace(" ", "_")
+            await context.bot.send_document(
+                chat_id=query.from_user.id,
+                document=io.BytesIO(ics),
+                filename=f"{safe_name}.ics",
+                caption=f"📅 Tap to add *{event['name']}* to your calendar!",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
