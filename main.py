@@ -4,7 +4,7 @@ import sys
 
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler
 
-from config import GROUP_CHAT_ID, ICS_DIR, SERVER_PORT, SERVER_URL, TOKEN
+from config import GROUP_CHAT_ID, TOKEN
 from database import init_db
 from handlers.booking import booking_conv_handler
 from handlers.event import event_conv_handler
@@ -48,49 +48,8 @@ logger = logging.getLogger(__name__)
 
 
 async def post_init(application):
-    import os
     await init_db()
     setup_scheduler(application)
-
-    if SERVER_URL:
-        from aiohttp import web
-        os.makedirs(ICS_DIR, exist_ok=True)
-
-        async def serve_ics(request):
-            filename = request.match_info["filename"]
-            if ".." in filename or "/" in filename or "\\" in filename:
-                raise web.HTTPNotFound()
-            filepath = os.path.join(ICS_DIR, filename)
-            if not os.path.isfile(filepath):
-                raise web.HTTPNotFound()
-            return web.FileResponse(filepath, headers={
-                "Content-Type": "text/calendar; charset=utf-8",
-                "Content-Disposition": f'inline; filename="{filename}"',
-            })
-
-        async def calendar_redirect(request):
-            filename = request.match_info["filename"]
-            if ".." in filename or "/" in filename or "\\" in filename:
-                raise web.HTTPNotFound()
-            webcal_url = SERVER_URL.replace("http://", "webcal://").replace("https://", "webcal://")
-            webcal_url = f"{webcal_url}/ics/{filename}"
-            html = (
-                f'<!DOCTYPE html><html><head>'
-                f'<meta http-equiv="refresh" content="0; url={webcal_url}">'
-                f'</head><body>'
-                f'<p><a href="{webcal_url}">Tap here to add to Apple Calendar</a></p>'
-                f'</body></html>'
-            )
-            return web.Response(text=html, content_type="text/html")
-
-        aio_app = web.Application()
-        aio_app.router.add_get("/ics/{filename}", serve_ics)
-        aio_app.router.add_get("/calendar/{filename}", calendar_redirect)
-        runner = web.AppRunner(aio_app)
-        await runner.setup()
-        await web.TCPSite(runner, "0.0.0.0", SERVER_PORT).start()
-        application.bot_data["http_runner"] = runner
-        logger.info("ICS file server running on port %s", SERVER_PORT)
 
     if not GROUP_CHAT_ID:
         logger.warning(
@@ -106,9 +65,7 @@ async def post_init(application):
 
 
 async def post_shutdown(application):
-    runner = application.bot_data.get("http_runner")
-    if runner:
-        await runner.cleanup()
+    pass
 
 
 def main():

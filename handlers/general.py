@@ -22,7 +22,7 @@ from database import (
     update_event_reminders,
 )
 from handlers.event import attendance_keyboard, build_event_card
-from utils import format_date, format_time, generate_ics, get_weekend_dates, normalize_username, save_ics
+from utils import format_date, format_time, get_weekend_dates, normalize_username
 
 
 # ── /weekend ──────────────────────────────────────────────────────────────────
@@ -392,23 +392,3 @@ async def attendance_callback_handler(update: Update, context: ContextTypes.DEFA
     except Exception:
         pass
 
-    if status == "going":
-        from config import SERVER_URL
-        if SERVER_URL:
-            try:
-                ics      = generate_ics(event["name"], event["date"], event["time"],
-                                        event.get("location"), event.get("notes"))
-                filename = f"event_{event_id}_{username}.ics"
-                save_ics(filename, ics)
-                url  = f"{SERVER_URL}/calendar/{filename}"
-                name = FAMILY.get(username, f"@{username}")
-                await context.bot.send_message(
-                    chat_id=GROUP_CHAT_ID,
-                    text=f"📅 {name}, add *{event['name']}* to your calendar:",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("📅 Add to Apple Calendar", url=url)
-                    ]]),
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                logger.error("ICS calendar invite failed: %s", e)
