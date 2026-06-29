@@ -59,6 +59,24 @@ async def init_db():
                 FOREIGN KEY (event_id) REFERENCES events(id),
                 UNIQUE(event_id, username)
             );
+
+            CREATE TABLE IF NOT EXISTS trips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                depart_date TEXT NOT NULL,
+                return_date TEXT NOT NULL,
+                notes TEXT,
+                open_to_companions INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS trip_companions (
+                trip_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                PRIMARY KEY (trip_id, username),
+                FOREIGN KEY (trip_id) REFERENCES trips(id)
+            );
         """)
         await db.commit()
 
@@ -243,6 +261,63 @@ async def delete_plan(username, date):
         )
         await db.commit()
         return cur.rowcount > 0
+
+
+# ── Trips ─────────────────────────────────────────────────────────────────────
+
+async def create_trip(username, destination, depart_date, return_date, notes, open_to_companions):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """INSERT INTO trips (username, destination, depart_date, return_date, notes, open_to_companions)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (username, destination, depart_date, return_date, notes, int(open_to_companions)),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_trip(trip_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def get_upcoming_trips():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        today = datetime.now().strftime("%Y-%m-%d")
+        async with db.execute(
+            "SELECT * FROM trips WHERE return_date >= ? ORDER BY depart_date",
+            (today,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
+async def delete_trip(trip_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM trip_companions WHERE trip_id = ?", (trip_id,))
+        await db.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+        await db.commit()
+
+
+async def add_trip_companion(trip_id, username):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO trip_companions (trip_id, username) VALUES (?, ?)",
+            (trip_id, username),
+        )
+        await db.commit()
+
+
+async def get_trip_companions(trip_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM trip_companions WHERE trip_id = ?", (trip_id,)
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 
 
 # ── Muted reminders ───────────────────────────────────────────────────────────

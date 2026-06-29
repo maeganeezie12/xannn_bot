@@ -23,6 +23,13 @@ from handlers.general import (
     whoami_handler,
 )
 from handlers.plans import cancelplan_conv_handler, myplans_handler, plan_conv_handler
+from handlers.travel import (
+    canceltrip_handler,
+    jointrip_callback,
+    jointrip_command,
+    travel_conv_handler,
+    trips_handler,
+)
 from scheduler import setup_scheduler
 
 # Windows asyncio fix
@@ -112,6 +119,7 @@ def main():
     app.add_handler(booking_conv_handler)
     app.add_handler(plan_conv_handler)
     app.add_handler(cancelplan_conv_handler)
+    app.add_handler(travel_conv_handler)
 
     # Simple commands
     app.add_handler(CommandHandler("start",          help_handler))
@@ -126,10 +134,15 @@ def main():
     app.add_handler(CommandHandler("mute",           mute_handler))
     app.add_handler(CommandHandler("myplans",        myplans_handler))
     app.add_handler(CommandHandler("reminders",      reminders_handler))
+    app.add_handler(CommandHandler("travel",         travel_conv_handler))
+    app.add_handler(CommandHandler("trips",          trips_handler))
+    app.add_handler(CommandHandler("jointrip",       jointrip_command))
+    app.add_handler(CommandHandler("canceltrip",     canceltrip_handler))
 
     # Callback queries
     app.add_handler(CallbackQueryHandler(attendance_callback_handler, pattern=r"^attend_"))
     app.add_handler(CallbackQueryHandler(change_reminders_callback,   pattern=r"^chrem_"))
+    app.add_handler(CallbackQueryHandler(jointrip_callback,           pattern=r"^jointrip_"))
 
     logger.info("XANNNBot starting...")
     app.run_polling(allowed_updates=["message", "callback_query"])
