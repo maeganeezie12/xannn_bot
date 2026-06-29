@@ -1,6 +1,9 @@
+import logging
 from collections import defaultdict
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+
+logger = logging.getLogger(__name__)
 from telegram.ext import ContextTypes
 
 from config import FAMILY, GROUP_CHAT_ID
@@ -18,9 +21,8 @@ from database import (
     set_attendance,
     update_event_reminders,
 )
-import io
 from handlers.event import attendance_keyboard, build_event_card
-from utils import format_date, format_time, generate_ics, get_weekend_dates, normalize_username
+from utils import format_date, format_time, generate_ics, get_weekend_dates, normalize_username, save_ics
 
 
 # ── /weekend ──────────────────────────────────────────────────────────────────
@@ -387,18 +389,22 @@ async def attendance_callback_handler(update: Update, context: ContextTypes.DEFA
         pass
 
     if status == "going":
-        try:
-            ics = generate_ics(
-                event["name"], event["date"], event["time"],
-                event.get("location"), event.get("notes"),
-            )
-            safe_name = event["name"].replace(" ", "_")
-            await context.bot.send_document(
-                chat_id=query.from_user.id,
-                document=io.BytesIO(ics),
-                filename=f"{safe_name}.ics",
-                caption=f"📅 Tap to add *{event['name']}* to your calendar!",
-                parse_mode="Markdown",
-            )
-        except Exception:
-            pass
+        from config import SERVER_URL
+        if SERVER_URL:
+            try:
+                ics      = generate_ics(event["name"], event["date"], event["time"],
+                                        event.get("location"), event.get("notes"))
+                filename = f"event_{event_id}_{username}.ics"
+                save_ics(filename, ics)
+                url  = f"{SERVER_URL}/calendar/{filename}"
+                name = FAMILY.get(username, f"@{username}")
+                await context.bot.send_message(
+                    chat_id=GROUP_CHAT_ID,
+                    text=f"📅 {name}, add *{event['name']}* to your calendar:",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("📅 Add to Apple Calendar", url=url)
+                    ]]),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.error("ICS calendar invite failed: %s", e)

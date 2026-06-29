@@ -61,8 +61,24 @@ async def post_init(application):
                 "Content-Disposition": f'inline; filename="{filename}"',
             })
 
+        async def calendar_redirect(request):
+            filename = request.match_info["filename"]
+            if ".." in filename or "/" in filename or "\\" in filename:
+                raise web.HTTPNotFound()
+            webcal_url = SERVER_URL.replace("http://", "webcal://").replace("https://", "webcal://")
+            webcal_url = f"{webcal_url}/ics/{filename}"
+            html = (
+                f'<!DOCTYPE html><html><head>'
+                f'<meta http-equiv="refresh" content="0; url={webcal_url}">'
+                f'</head><body>'
+                f'<p><a href="{webcal_url}">Tap here to add to Apple Calendar</a></p>'
+                f'</body></html>'
+            )
+            return web.Response(text=html, content_type="text/html")
+
         aio_app = web.Application()
         aio_app.router.add_get("/ics/{filename}", serve_ics)
+        aio_app.router.add_get("/calendar/{filename}", calendar_redirect)
         runner = web.AppRunner(aio_app)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", SERVER_PORT).start()
