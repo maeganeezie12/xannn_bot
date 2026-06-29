@@ -28,6 +28,7 @@ from handlers.travel import (
     jointrip_callback,
     jointrip_command,
     travel_conv_handler,
+    trips_filter_callback,
     trips_handler,
 )
 from scheduler import setup_scheduler
@@ -100,6 +101,7 @@ def main():
     app.add_handler(CallbackQueryHandler(attendance_callback_handler, pattern=r"^attend_"))
     app.add_handler(CallbackQueryHandler(change_reminders_callback,   pattern=r"^chrem_"))
     app.add_handler(CallbackQueryHandler(jointrip_callback,           pattern=r"^jointrip_"))
+    app.add_handler(CallbackQueryHandler(trips_filter_callback,       pattern=r"^trips_"))
 
     logger.info("XANNNBot starting...")
     app.run_polling(allowed_updates=["message", "callback_query"])

@@ -1,5 +1,5 @@
 import logging
-from datetime import date as date_type
+from datetime import date as date_type, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -130,13 +130,41 @@ async def travel_companions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def trips_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    trips = await get_upcoming_trips()
-    if not trips:
-        await update.message.reply_text("No upcoming family trips. Plan one with /travel!")
-        return
+def _trips_keyboard():
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("Next 30 days",    callback_data="trips_30"),
+        InlineKeyboardButton("Till end of year", callback_data="trips_eoy"),
+        InlineKeyboardButton("All upcoming",    callback_data="trips_all"),
+    ]])
 
-    lines = ["✈️ *Upcoming Family Trips*\n"]
+
+async def trips_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Which trips do you want to see?",
+        reply_markup=_trips_keyboard(),
+    )
+
+
+async def _build_trips_text(filter_key: str) -> str:
+    today = date_type.today()
+    if filter_key == "30":
+        cutoff = str(today + timedelta(days=30))
+        label  = "Next 30 days"
+    elif filter_key == "eoy":
+        cutoff = f"{today.year}-12-31"
+        label  = f"Till end of {today.year}"
+    else:
+        cutoff = None
+        label  = "All upcoming"
+
+    trips = await get_upcoming_trips()
+    if cutoff:
+        trips = [t for t in trips if t["depart_date"] <= cutoff]
+
+    if not trips:
+        return f"No trips found for: {label}. Add one with /travel!"
+
+    lines = [f"✈️ *Family Trips — {label}*\n"]
     for t in trips:
         name       = FAMILY.get(t["username"], f"@{t['username']}")
         companions = await get_trip_companions(t["id"])
@@ -154,8 +182,15 @@ async def trips_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{notes_txt}{comp_txt}"
         )
         lines.append("")
+    return "\n".join(lines).strip()
 
-    await update.message.reply_text("\n".join(lines).strip(), parse_mode="Markdown")
+
+async def trips_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query      = update.callback_query
+    await query.answer()
+    filter_key = query.data.split("_")[1]
+    text       = await _build_trips_text(filter_key)
+    await query.edit_message_text(text, reply_markup=_trips_keyboard(), parse_mode="Markdown")
 
 
 async def jointrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
