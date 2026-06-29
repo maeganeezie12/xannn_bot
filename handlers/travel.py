@@ -149,13 +149,13 @@ async def trips_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             comp_txt = ""
         lines.append(
-            f"*{name}* → *{t['destination']}* \\(#{t['id']}\\)\n"
+            f"*{name}* → *{t['destination']}* (#{t['id']})\n"
             f"  {format_date(t['depart_date'])} → {format_date(t['return_date'])}"
             f"{notes_txt}{comp_txt}"
         )
         lines.append("")
 
-    await update.message.reply_text("\n".join(lines).strip(), parse_mode="MarkdownV2")
+    await update.message.reply_text("\n".join(lines).strip(), parse_mode="Markdown")
 
 
 async def jointrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
