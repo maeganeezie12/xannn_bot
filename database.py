@@ -125,6 +125,23 @@ async def close_event(event_id):
         await db.commit()
 
 
+async def update_event(event_id, name, date, time, location, notes):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE events SET name = ?, date = ?, time = ?, location = ?, notes = ? WHERE id = ?",
+            (name, date, time, location, notes, event_id),
+        )
+        await db.commit()
+
+
+async def delete_event(event_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM attendance WHERE event_id = ?", (event_id,))
+        await db.execute("DELETE FROM muted_reminders WHERE event_id = ?", (event_id,))
+        await db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        await db.commit()
+
+
 async def update_event_reminders(event_id, reminder_24h, reminder_1h):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -174,19 +191,30 @@ async def get_booking(booking_id):
             return dict(row) if row else None
 
 
-async def get_bookings_for_space_date(space, date):
+async def get_bookings_for_space_date(space, date, exclude_id=None):
     """Returns all bookings that conflict with this space on this date."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if space == "Entire House":
-            async with db.execute("SELECT * FROM bookings WHERE date = ?", (date,)) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+            query  = "SELECT * FROM bookings WHERE date = ?"
+            params = [date]
         else:
-            async with db.execute(
-                "SELECT * FROM bookings WHERE date = ? AND (space = ? OR space = 'Entire House')",
-                (date, space),
-            ) as cur:
-                return [dict(r) for r in await cur.fetchall()]
+            query  = "SELECT * FROM bookings WHERE date = ? AND (space = ? OR space = 'Entire House')"
+            params = [date, space]
+        if exclude_id is not None:
+            query += " AND id != ?"
+            params.append(exclude_id)
+        async with db.execute(query, params) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
+async def update_booking(booking_id, space, date, start_time, end_time, note):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE bookings SET space = ?, date = ?, start_time = ?, end_time = ?, note = ? WHERE id = ?",
+            (space, date, start_time, end_time, note, booking_id),
+        )
+        await db.commit()
 
 
 async def delete_booking(booking_id):
@@ -293,6 +321,15 @@ async def get_upcoming_trips():
             (today,),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
+
+
+async def update_trip(trip_id, destination, depart_date, return_date, notes):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE trips SET destination = ?, depart_date = ?, return_date = ?, notes = ? WHERE id = ?",
+            (destination, depart_date, return_date, notes, trip_id),
+        )
+        await db.commit()
 
 
 async def delete_trip(trip_id):

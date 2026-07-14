@@ -178,6 +178,19 @@ def times_overlap(start1: str, end1: str, start2: str, end2: str, buffer_mins: i
     return not (e1 <= s2 or e2 <= s1)
 
 
+# ── Inline keyboard helpers ───────────────────────────────────────────────────
+
+def remove_keyboard_row(keyboard_rows, item_id):
+    """Drop the row whose first button's callback_data ends in _<item_id> (used after cancel)."""
+    target = str(item_id)
+
+    def row_key(row):
+        cd = row[0].callback_data
+        return cd.rsplit("_", 1)[1] if "_" in cd else None
+
+    return [row for row in keyboard_rows if row_key(row) != target]
+
+
 # ── Username helpers ─────────────────────────────────────────────────────────
 
 def normalize_username(username) -> str:

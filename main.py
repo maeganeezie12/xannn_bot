@@ -6,8 +6,8 @@ from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandle
 
 from config import GROUP_CHAT_ID, TOKEN
 from database import init_db
-from handlers.booking import booking_conv_handler
-from handlers.event import event_conv_handler
+from handlers.booking import bookcancel_callback, booking_conv_handler
+from handlers.event import event_conv_handler, eventcancel_callback
 from handlers.general import (
     attendance_callback_handler,
     cancel_booking_handler,
@@ -22,12 +22,13 @@ from handlers.general import (
     weekend_handler,
     whoami_handler,
 )
-from handlers.plans import cancelplan_conv_handler, myplans_handler, plan_conv_handler
+from handlers.plans import cancelplan_conv_handler, myplans_handler, plan_conv_handler, plancancel_callback
 from handlers.travel import (
     canceltrip_handler,
     jointrip_callback,
     jointrip_command,
     travel_conv_handler,
+    tripcancel_callback,
     trips_filter_callback,
     trips_handler,
 )
@@ -102,6 +103,10 @@ def main():
     app.add_handler(CallbackQueryHandler(change_reminders_callback,   pattern=r"^chrem_"))
     app.add_handler(CallbackQueryHandler(jointrip_callback,           pattern=r"^jointrip_"))
     app.add_handler(CallbackQueryHandler(trips_filter_callback,       pattern=r"^trips_"))
+    app.add_handler(CallbackQueryHandler(tripcancel_callback,         pattern=r"^tripcancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(bookcancel_callback,         pattern=r"^bookcancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(eventcancel_callback,        pattern=r"^eventcancel_\d+$"))
+    app.add_handler(CallbackQueryHandler(plancancel_callback,         pattern=r"^plancancel_"))
 
     logger.info("XANNNBot starting...")
     app.run_polling(allowed_updates=["message", "callback_query"])

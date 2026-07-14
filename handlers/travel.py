@@ -19,8 +19,9 @@ from database import (
     get_trip,
     get_trip_companions,
     get_upcoming_trips,
+    update_trip,
 )
-from utils import format_date, normalize_username, parse_date
+from utils import format_date, normalize_username, parse_date, remove_keyboard_row
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +72,98 @@ async def travel_return(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def travel_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["notes"] = update.message.text.strip()
+    if context.user_data.get("edit_trip_id"):
+        return await _finalize_trip_edit(update, context)
     return await _ask_companions(update, context)
 
 
 async def travel_skip_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["notes"] = None
+    if context.user_data.get("edit_trip_id"):
+        return await _finalize_trip_edit(update, context)
     return await _ask_companions(update, context)
+
+
+async def _finalize_trip_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    trip_id  = context.user_data["edit_trip_id"]
+    username = normalize_username(update.effective_user.username)
+
+    await update_trip(
+        trip_id,
+        context.user_data["destination"],
+        context.user_data["depart_date"],
+        context.user_data["return_date"],
+        context.user_data.get("notes"),
+    )
+
+    name = FAMILY.get(username, f"@{username}")
+    dest = context.user_data["destination"]
+    dep  = format_date(context.user_data["depart_date"])
+    ret  = format_date(context.user_data["return_date"])
+
+    await update.message.reply_text(f"Trip updated! ✈️ {dest}, {dep} → {ret}")
+
+    if GROUP_CHAT_ID:
+        await context.bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=f"✏️ *{name}* updated their trip: now heading to *{dest}*, {dep} → {ret}",
+            parse_mode="Markdown",
+        )
+
+    return ConversationHandler.END
+
+
+async def tripedit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query    = update.callback_query
+    username = normalize_username(query.from_user.username)
+    trip_id  = int(query.data.split("_")[1])
+    trip     = await get_trip(trip_id)
+
+    if not trip:
+        await query.answer("Trip not found.", show_alert=True)
+        return ConversationHandler.END
+    if trip["username"] != username:
+        await query.answer("You can only edit your own trips!", show_alert=True)
+        return ConversationHandler.END
+
+    await query.answer()
+    context.user_data.clear()
+    context.user_data["edit_trip_id"] = trip_id
+    await query.message.reply_text(
+        f"Editing trip #{trip_id}. Where are you going? (currently: {trip['destination']})"
+    )
+    return DESTINATION
+
+
+async def tripcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query    = update.callback_query
+    username = normalize_username(query.from_user.username)
+    trip_id  = int(query.data.split("_")[1])
+    trip     = await get_trip(trip_id)
+
+    if not trip:
+        await query.answer("Trip not found.", show_alert=True)
+        return
+    if trip["username"] != username:
+        await query.answer("You can only cancel your own trips!", show_alert=True)
+        return
+
+    await delete_trip(trip_id)
+    await query.answer("Trip cancelled.")
+
+    name = FAMILY.get(username, f"@{username}")
+    if GROUP_CHAT_ID:
+        await context.bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=f"✈️ *{name}*'s trip to *{trip['destination']}* has been cancelled.",
+            parse_mode="Markdown",
+        )
+
+    try:
+        new_kb = remove_keyboard_row(query.message.reply_markup.inline_keyboard, trip_id)
+        await query.edit_message_reply_markup(InlineKeyboardMarkup(new_kb))
+    except Exception:
+        pass
 
 
 async def _ask_companions(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -162,9 +249,10 @@ async def _build_trips_text(filter_key: str) -> str:
         trips = [t for t in trips if t["depart_date"] <= cutoff]
 
     if not trips:
-        return f"No trips found for: {label}. Add one with /travel!"
+        return f"No trips found for: {label}. Add one with /travel!", None
 
-    lines = [f"✈️ *Family Trips — {label}*\n"]
+    lines         = [f"✈️ *Family Trips — {label}*\n"]
+    keyboard_rows = []
     for t in trips:
         name       = FAMILY.get(t["username"], f"@{t['username']}")
         companions = await get_trip_companions(t["id"])
@@ -182,15 +270,19 @@ async def _build_trips_text(filter_key: str) -> str:
             f"{notes_txt}{comp_txt}"
         )
         lines.append("")
-    return "\n".join(lines).strip()
+        keyboard_rows.append([
+            InlineKeyboardButton(f"✏️ Edit #{t['id']}",   callback_data=f"tripedit_{t['id']}"),
+            InlineKeyboardButton(f"❌ Cancel #{t['id']}", callback_data=f"tripcancel_{t['id']}"),
+        ])
+    return "\n".join(lines).strip(), InlineKeyboardMarkup(keyboard_rows)
 
 
 async def trips_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query      = update.callback_query
     await query.answer()
     filter_key = query.data.split("_")[1]
-    text       = await _build_trips_text(filter_key)
-    await query.edit_message_text(text, parse_mode="Markdown")
+    text, keyboard = await _build_trips_text(filter_key)
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def jointrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -312,7 +404,10 @@ async def canceltrip_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 travel_conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("travel", travel_start)],
+    entry_points=[
+        CommandHandler("travel", travel_start),
+        CallbackQueryHandler(tripedit_start, pattern=r"^tripedit_\d+$"),
+    ],
     states={
         DESTINATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, travel_destination)],
         DEPART_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, travel_depart)],

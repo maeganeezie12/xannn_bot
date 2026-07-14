@@ -9,8 +9,14 @@ from telegram.ext import (
 )
 
 from config import BOOKING_BUFFER_MINUTES, FAMILY, GROUP_CHAT_ID, SPACES
-from database import create_booking, get_bookings_for_space_date
-from utils import format_date, format_time, normalize_username, parse_date, parse_time, times_overlap
+from database import (
+    create_booking,
+    delete_booking,
+    get_booking,
+    get_bookings_for_space_date,
+    update_booking,
+)
+from utils import format_date, format_time, normalize_username, parse_date, parse_time, remove_keyboard_row, times_overlap
 
 SPACE, DATE, START_TIME, END_TIME, NOTE = range(5)
 
@@ -93,8 +99,9 @@ async def got_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start = d["start_time"]
     end   = d["end_time"]
     username = normalize_username(update.effective_user.username)
+    edit_id  = d.get("edit_booking_id")
 
-    existing = await get_bookings_for_space_date(space, date)
+    existing = await get_bookings_for_space_date(space, date, exclude_id=edit_id)
     for b in existing:
         if times_overlap(start, end, b["start_time"], b["end_time"], BOOKING_BUFFER_MINUTES):
             blocker = FAMILY.get(b["creator_username"], f"@{b['creator_username']}")
@@ -108,7 +115,13 @@ async def got_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return ConversationHandler.END
 
-    booking_id = await create_booking(space, date, start, end, note, username)
+    if edit_id:
+        await update_booking(edit_id, space, date, start, end, note)
+        booking_id = edit_id
+        verb, past_verb = "updated", "Updated"
+    else:
+        booking_id = await create_booking(space, date, start, end, note, username)
+        verb, past_verb = "booked", "Booked"
 
     sh, sm = map(int, start.split(":"))
     eh, em = map(int, end.split(":"))
@@ -118,14 +131,77 @@ async def got_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=GROUP_CHAT_ID,
         text=(
-            f"🏠 *{name}* has booked *{space}* on {format_date(date)}, "
+            f"🏠 *{name}* has {verb} *{space}* on {format_date(date)}, "
             f"{format_time(sh, sm)}–{format_time(eh, em)}{note_txt}.\n"
             f"Booking ID: \\#{booking_id}"
         ),
         parse_mode="Markdown",
     )
-    await update.message.reply_text(f"Booked! 🎉 Booking ID: #{booking_id}")
+    await update.message.reply_text(f"{past_verb}! 🎉 Booking ID: #{booking_id}")
     return ConversationHandler.END
+
+
+async def bookedit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query      = update.callback_query
+    username   = normalize_username(query.from_user.username)
+    booking_id = int(query.data.split("_")[1])
+    booking    = await get_booking(booking_id)
+
+    if not booking:
+        await query.answer("Booking not found.", show_alert=True)
+        return ConversationHandler.END
+    if booking["creator_username"] != username:
+        await query.answer("You can only edit your own bookings!", show_alert=True)
+        return ConversationHandler.END
+
+    await query.answer()
+    context.user_data.clear()
+    context.user_data["edit_booking_id"] = booking_id
+    keyboard = [[InlineKeyboardButton(s, callback_data=f"space_{s}")] for s in SPACES]
+    await query.message.reply_text(
+        f"Editing booking #{booking_id} (currently *{booking['space']}*). Which space/asset?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown",
+    )
+    return SPACE
+
+
+async def bookcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query      = update.callback_query
+    username   = normalize_username(query.from_user.username)
+    booking_id = int(query.data.split("_")[1])
+    booking    = await get_booking(booking_id)
+
+    if not booking:
+        await query.answer("Booking not found.", show_alert=True)
+        return
+    if booking["creator_username"] != username:
+        await query.answer("You can only cancel your own bookings!", show_alert=True)
+        return
+
+    await delete_booking(booking_id)
+    await query.answer("Booking cancelled.")
+
+    sh, sm = map(int, booking["start_time"].split(":"))
+    eh, em = map(int, booking["end_time"].split(":"))
+    name = FAMILY.get(username, f"@{username}")
+
+    if GROUP_CHAT_ID:
+        await context.bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=(
+                f"🔓 *{name}* cancelled their booking of *{booking['space']}* on "
+                f"{format_date(booking['date'])}, {format_time(sh, sm)}–{format_time(eh, em)}. "
+                f"Space is free again!"
+            ),
+            parse_mode="Markdown",
+        )
+
+    try:
+        new_kb = remove_keyboard_row(query.message.reply_markup.inline_keyboard, booking_id)
+        await query.edit_message_reply_markup(InlineKeyboardMarkup(new_kb))
+    except Exception:
+        pass
 
 
 async def book_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134,7 +210,10 @@ async def book_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 booking_conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("book", book_start)],
+    entry_points=[
+        CommandHandler("book", book_start),
+        CallbackQueryHandler(bookedit_start, pattern=r"^bookedit_\d+$"),
+    ],
     states={
         SPACE:      [CallbackQueryHandler(got_space,      pattern="^space_")],
         DATE:       [MessageHandler(filters.TEXT & ~filters.COMMAND, got_date)],
@@ -144,4 +223,5 @@ booking_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler("cancel", book_cancel)],
     allow_reentry=True,
+    per_message=False,
 )

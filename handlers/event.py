@@ -9,8 +9,16 @@ from telegram.ext import (
 )
 
 from config import FAMILY, GROUP_CHAT_ID
-from database import create_event, get_attendance, update_event_message_id
-from utils import format_date, format_time, get_event_datetime, normalize_username, parse_date, parse_time
+from database import (
+    create_event,
+    delete_event,
+    get_attendance,
+    get_event,
+    update_event,
+    update_event_message_id,
+    update_event_reminders,
+)
+from utils import format_date, format_time, get_event_datetime, normalize_username, parse_date, parse_time, remove_keyboard_row
 
 NAME, DATE, TIME, LOCATION, NOTES, REMINDERS = range(6)
 
@@ -122,6 +130,39 @@ async def got_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     r1  = choice in ("rem_1h",  "rem_both")
 
     d = context.user_data
+    edit_id = d.get("edit_event_id")
+
+    if edit_id:
+        await update_event(edit_id, d["name"], d["date"], d["time"], d.get("location"), d.get("notes"))
+        await update_event_reminders(edit_id, r24, r1)
+        event_id = edit_id
+        event = await get_event(event_id)
+
+        if event["event_message_id"] and GROUP_CHAT_ID:
+            att  = await get_attendance(event_id)
+            card = build_event_card(event_id, d["name"], d["date"], d["time"], d.get("location"), d.get("notes"), att)
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=GROUP_CHAT_ID,
+                    message_id=event["event_message_id"],
+                    text=card,
+                    reply_markup=attendance_keyboard(event_id),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+
+        from scheduler import remove_event_reminders, schedule_event_reminders
+        remove_event_reminders(context.application, event_id)
+        if r24 or r1:
+            schedule_event_reminders(
+                context.application, event_id, d["name"],
+                get_event_datetime(d["date"], d["time"]), r24, r1,
+            )
+
+        await query.edit_message_text(f"Event #{event_id} updated! 👍")
+        return ConversationHandler.END
+
     event_id = await create_event(
         name=d["name"], date=d["date"], time=d["time"],
         location=d.get("location"), notes=d.get("notes"),
@@ -154,8 +195,71 @@ async def event_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def eventedit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query    = update.callback_query
+    username = normalize_username(query.from_user.username)
+    event_id = int(query.data.split("_")[1])
+    event    = await get_event(event_id)
+
+    if not event:
+        await query.answer("Event not found.", show_alert=True)
+        return ConversationHandler.END
+    if event["creator_username"] != username:
+        await query.answer("Only the event creator can edit this!", show_alert=True)
+        return ConversationHandler.END
+
+    await query.answer()
+    context.user_data.clear()
+    context.user_data["edit_event_id"] = event_id
+    await query.message.reply_text(
+        f"Editing *{event['name']}*. What's the new name? (or send the same name)",
+        parse_mode="Markdown",
+    )
+    return NAME
+
+
+async def eventcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query    = update.callback_query
+    username = normalize_username(query.from_user.username)
+    event_id = int(query.data.split("_")[1])
+    event    = await get_event(event_id)
+
+    if not event:
+        await query.answer("Event not found.", show_alert=True)
+        return
+    if event["creator_username"] != username:
+        await query.answer("Only the event creator can cancel this!", show_alert=True)
+        return
+
+    await delete_event(event_id)
+    await query.answer("Event cancelled.")
+
+    if event["event_message_id"] and GROUP_CHAT_ID:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=GROUP_CHAT_ID,
+                message_id=event["event_message_id"],
+                text=f"🚫 *{event['name']}* has been cancelled.",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+
+    from scheduler import remove_event_reminders
+    remove_event_reminders(context.application, event_id)
+
+    try:
+        new_kb = remove_keyboard_row(query.message.reply_markup.inline_keyboard, event_id)
+        await query.edit_message_reply_markup(InlineKeyboardMarkup(new_kb))
+    except Exception:
+        pass
+
+
 event_conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("event", event_start)],
+    entry_points=[
+        CommandHandler("event", event_start),
+        CallbackQueryHandler(eventedit_start, pattern=r"^eventedit_\d+$"),
+    ],
     states={
         NAME:     [MessageHandler(filters.TEXT & ~filters.COMMAND, got_name)],
         DATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, got_date)],
@@ -166,4 +270,5 @@ event_conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler("cancel", event_cancel)],
     allow_reentry=True,
+    per_message=False,
 )
