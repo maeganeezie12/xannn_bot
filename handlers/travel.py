@@ -21,7 +21,7 @@ from database import (
     get_upcoming_trips,
     update_trip,
 )
-from utils import format_date, normalize_username, parse_date, remove_keyboard_row
+from utils import format_date, normalize_username, parse_date
 
 logger = logging.getLogger(__name__)
 
@@ -113,43 +113,39 @@ async def _finalize_trip_edit(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
-async def tripedit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query    = update.callback_query
-    username = normalize_username(query.from_user.username)
-    trip_id  = int(query.data.split("_")[1])
+async def edittrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = normalize_username(update.effective_user.username)
+    trip_id  = int(update.message.text.strip().lstrip("/").replace("edittrip", ""))
     trip     = await get_trip(trip_id)
 
     if not trip:
-        await query.answer("Trip not found.", show_alert=True)
+        await update.message.reply_text(f"No trip #{trip_id} found.")
         return ConversationHandler.END
     if trip["username"] != username:
-        await query.answer("You can only edit your own trips!", show_alert=True)
+        await update.message.reply_text("You can only edit your own trips!")
         return ConversationHandler.END
 
-    await query.answer()
     context.user_data.clear()
     context.user_data["edit_trip_id"] = trip_id
-    await query.message.reply_text(
+    await update.message.reply_text(
         f"Editing trip #{trip_id}. Where are you going? (currently: {trip['destination']})"
     )
     return DESTINATION
 
 
-async def tripcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query    = update.callback_query
-    username = normalize_username(query.from_user.username)
-    trip_id  = int(query.data.split("_")[1])
+async def canceltrip_text_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = normalize_username(update.effective_user.username)
+    trip_id  = int(update.message.text.strip().lstrip("/").replace("canceltrip", ""))
     trip     = await get_trip(trip_id)
 
     if not trip:
-        await query.answer("Trip not found.", show_alert=True)
+        await update.message.reply_text(f"No trip #{trip_id} found.")
         return
     if trip["username"] != username:
-        await query.answer("You can only cancel your own trips!", show_alert=True)
+        await update.message.reply_text("You can only cancel your own trips!")
         return
 
     await delete_trip(trip_id)
-    await query.answer("Trip cancelled.")
 
     name = FAMILY.get(username, f"@{username}")
     if GROUP_CHAT_ID:
@@ -158,12 +154,7 @@ async def tripcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             text=f"✈️ *{name}*'s trip to *{trip['destination']}* has been cancelled.",
             parse_mode="Markdown",
         )
-
-    try:
-        new_kb = remove_keyboard_row(query.message.reply_markup.inline_keyboard, trip_id)
-        await query.edit_message_reply_markup(InlineKeyboardMarkup(new_kb))
-    except Exception:
-        pass
+    await update.message.reply_text("Trip cancelled. Group has been notified.")
 
 
 async def _ask_companions(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -249,10 +240,9 @@ async def _build_trips_text(filter_key: str) -> str:
         trips = [t for t in trips if t["depart_date"] <= cutoff]
 
     if not trips:
-        return f"No trips found for: {label}. Add one with /travel!", None
+        return f"No trips found for: {label}. Add one with /travel!"
 
-    lines         = [f"✈️ *Family Trips — {label}*\n"]
-    keyboard_rows = []
+    lines = [f"✈️ *Family Trips — {label}*\n"]
     for t in trips:
         name       = FAMILY.get(t["username"], f"@{t['username']}")
         companions = await get_trip_companions(t["id"])
@@ -267,22 +257,19 @@ async def _build_trips_text(filter_key: str) -> str:
         lines.append(
             f"*{name}* → *{t['destination']}* (#{t['id']})\n"
             f"  {format_date(t['depart_date'])} → {format_date(t['return_date'])}"
-            f"{notes_txt}{comp_txt}"
+            f"{notes_txt}{comp_txt}\n"
+            f"  ✏️ /edittrip{t['id']}   ❌ /canceltrip{t['id']}"
         )
         lines.append("")
-        keyboard_rows.append([
-            InlineKeyboardButton(f"✏️ Edit #{t['id']}",   callback_data=f"tripedit_{t['id']}"),
-            InlineKeyboardButton(f"❌ Cancel #{t['id']}", callback_data=f"tripcancel_{t['id']}"),
-        ])
-    return "\n".join(lines).strip(), InlineKeyboardMarkup(keyboard_rows)
+    return "\n".join(lines).strip()
 
 
 async def trips_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query      = update.callback_query
     await query.answer()
     filter_key = query.data.split("_")[1]
-    text, keyboard = await _build_trips_text(filter_key)
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    text       = await _build_trips_text(filter_key)
+    await query.edit_message_text(text, parse_mode="Markdown")
 
 
 async def jointrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -406,7 +393,7 @@ async def canceltrip_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 travel_conv_handler = ConversationHandler(
     entry_points=[
         CommandHandler("travel", travel_start),
-        CallbackQueryHandler(tripedit_start, pattern=r"^tripedit_\d+$"),
+        MessageHandler(filters.Regex(r"(?i)^/edittrip\d+$"), edittrip_command),
     ],
     states={
         DESTINATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, travel_destination)],

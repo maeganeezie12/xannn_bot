@@ -92,8 +92,7 @@ async def events_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for e in events:
         by_date[e["date"]].append(e)
 
-    lines         = ["*Upcoming Events*\n"]
-    keyboard_rows = []
+    lines = ["*Upcoming Events*\n"]
     for date in sorted(by_date):
         lines.append(f"*{format_date(date)}*")
         for e in by_date[date]:
@@ -107,15 +106,10 @@ async def events_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             attendance_txt = "  |  ".join(filter(None, [going_txt, not_going_txt])) or "No responses yet"
             lines.append(f"  *#{e['id']}* {format_time(h, m)} — {e['name']}{loc}")
             lines.append(f"  {attendance_txt}")
-            keyboard_rows.append([
-                InlineKeyboardButton(f"✏️ Edit #{e['id']}",   callback_data=f"eventedit_{e['id']}"),
-                InlineKeyboardButton(f"❌ Cancel #{e['id']}", callback_data=f"eventcancel_{e['id']}"),
-            ])
+            lines.append(f"  ✏️ /editevent{e['id']}   ❌ /cancelevent{e['id']}")
         lines.append("")
 
-    await update.message.reply_text(
-        "\n".join(lines).strip(), parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard_rows)
-    )
+    await update.message.reply_text("\n".join(lines).strip(), parse_mode="Markdown")
 
 
 # ── /status ───────────────────────────────────────────────────────────────────
@@ -154,8 +148,7 @@ async def spaces_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for b in bookings:
         by_date[b["date"]].append(b)
 
-    lines         = ["*Upcoming space/asset bookings:*\n"]
-    keyboard_rows = []
+    lines = ["*Upcoming space/asset bookings:*\n"]
     for date in sorted(by_date):
         lines.append(f"*{format_date(date)}*")
         for b in by_date[date]:
@@ -164,14 +157,9 @@ async def spaces_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             booker = FAMILY.get(b["creator_username"], f"@{b['creator_username']}")
             note   = f' "{b["note"]}"' if b["note"] else ""
             lines.append(f"  • \\#{b['id']} {b['space']}: {format_time(sh, sm)}–{format_time(eh, em)} ({booker}{note})")
-            keyboard_rows.append([
-                InlineKeyboardButton(f"✏️ Edit #{b['id']}",   callback_data=f"bookedit_{b['id']}"),
-                InlineKeyboardButton(f"❌ Cancel #{b['id']}", callback_data=f"bookcancel_{b['id']}"),
-            ])
+            lines.append(f"    ✏️ /editbooking{b['id']}   ❌ /cancelbooking{b['id']}")
 
-    await update.message.reply_text(
-        "\n".join(lines), parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard_rows)
-    )
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 # ── /help / /start ────────────────────────────────────────────────────────────
@@ -215,8 +203,8 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/jointrip \\[id\\] — Join someone's trip\n"
         "/canceltrip \\[id\\] — Cancel your trip\n\n"
         "*✏️ Editing*\n"
-        "Every list \\(/trips, /seeevents, /spaces, /myplans\\) shows an Edit and Cancel "
-        "button next to each item you own — just tap instead of typing a command\\.\n\n"
+        "Every list \\(/trips, /seeevents, /spaces, /myplans\\) shows a tappable "
+        "/edit\\.\\.\\. and /cancel\\.\\.\\. command next to each item you own — just tap it to run it\\.\n\n"
         "/cancel — Cancel current wizard"
     )
     await update.message.reply_text(text, parse_mode="MarkdownV2")

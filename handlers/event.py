@@ -18,7 +18,7 @@ from database import (
     update_event_message_id,
     update_event_reminders,
 )
-from utils import format_date, format_time, get_event_datetime, normalize_username, parse_date, parse_time, remove_keyboard_row
+from utils import format_date, format_time, get_event_datetime, normalize_username, parse_date, parse_time
 
 NAME, DATE, TIME, LOCATION, NOTES, REMINDERS = range(6)
 
@@ -195,44 +195,40 @@ async def event_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def eventedit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query    = update.callback_query
-    username = normalize_username(query.from_user.username)
-    event_id = int(query.data.split("_")[1])
+async def editevent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = normalize_username(update.effective_user.username)
+    event_id = int(update.message.text.strip().lstrip("/").replace("editevent", ""))
     event    = await get_event(event_id)
 
     if not event:
-        await query.answer("Event not found.", show_alert=True)
+        await update.message.reply_text(f"No event with ID #{event_id}.")
         return ConversationHandler.END
     if event["creator_username"] != username:
-        await query.answer("Only the event creator can edit this!", show_alert=True)
+        await update.message.reply_text("Only the event creator can edit this!")
         return ConversationHandler.END
 
-    await query.answer()
     context.user_data.clear()
     context.user_data["edit_event_id"] = event_id
-    await query.message.reply_text(
+    await update.message.reply_text(
         f"Editing *{event['name']}*. What's the new name? (or send the same name)",
         parse_mode="Markdown",
     )
     return NAME
 
 
-async def eventcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query    = update.callback_query
-    username = normalize_username(query.from_user.username)
-    event_id = int(query.data.split("_")[1])
+async def cancelevent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = normalize_username(update.effective_user.username)
+    event_id = int(update.message.text.strip().lstrip("/").replace("cancelevent", ""))
     event    = await get_event(event_id)
 
     if not event:
-        await query.answer("Event not found.", show_alert=True)
+        await update.message.reply_text(f"No event with ID #{event_id}.")
         return
     if event["creator_username"] != username:
-        await query.answer("Only the event creator can cancel this!", show_alert=True)
+        await update.message.reply_text("Only the event creator can cancel this!")
         return
 
     await delete_event(event_id)
-    await query.answer("Event cancelled.")
 
     if event["event_message_id"] and GROUP_CHAT_ID:
         try:
@@ -248,17 +244,13 @@ async def eventcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     from scheduler import remove_event_reminders
     remove_event_reminders(context.application, event_id)
 
-    try:
-        new_kb = remove_keyboard_row(query.message.reply_markup.inline_keyboard, event_id)
-        await query.edit_message_reply_markup(InlineKeyboardMarkup(new_kb))
-    except Exception:
-        pass
+    await update.message.reply_text(f"Event *{event['name']}* cancelled.", parse_mode="Markdown")
 
 
 event_conv_handler = ConversationHandler(
     entry_points=[
         CommandHandler("event", event_start),
-        CallbackQueryHandler(eventedit_start, pattern=r"^eventedit_\d+$"),
+        MessageHandler(filters.Regex(r"(?i)^/editevent\d+$"), editevent_command),
     ],
     states={
         NAME:     [MessageHandler(filters.TEXT & ~filters.COMMAND, got_name)],

@@ -16,7 +16,7 @@ from database import (
     get_bookings_for_space_date,
     update_booking,
 )
-from utils import format_date, format_time, normalize_username, parse_date, parse_time, remove_keyboard_row, times_overlap
+from utils import format_date, format_time, normalize_username, parse_date, parse_time, times_overlap
 
 SPACE, DATE, START_TIME, END_TIME, NOTE = range(5)
 
@@ -141,24 +141,22 @@ async def got_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def bookedit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query      = update.callback_query
-    username   = normalize_username(query.from_user.username)
-    booking_id = int(query.data.split("_")[1])
+async def editbooking_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username   = normalize_username(update.effective_user.username)
+    booking_id = int(update.message.text.strip().lstrip("/").replace("editbooking", ""))
     booking    = await get_booking(booking_id)
 
     if not booking:
-        await query.answer("Booking not found.", show_alert=True)
+        await update.message.reply_text(f"No booking #{booking_id} found.")
         return ConversationHandler.END
     if booking["creator_username"] != username:
-        await query.answer("You can only edit your own bookings!", show_alert=True)
+        await update.message.reply_text("You can only edit your own bookings!")
         return ConversationHandler.END
 
-    await query.answer()
     context.user_data.clear()
     context.user_data["edit_booking_id"] = booking_id
     keyboard = [[InlineKeyboardButton(s, callback_data=f"space_{s}")] for s in SPACES]
-    await query.message.reply_text(
+    await update.message.reply_text(
         f"Editing booking #{booking_id} (currently *{booking['space']}*). Which space/asset?",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown",
@@ -166,21 +164,19 @@ async def bookedit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SPACE
 
 
-async def bookcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query      = update.callback_query
-    username   = normalize_username(query.from_user.username)
-    booking_id = int(query.data.split("_")[1])
+async def cancelbooking_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username   = normalize_username(update.effective_user.username)
+    booking_id = int(update.message.text.strip().lstrip("/").replace("cancelbooking", ""))
     booking    = await get_booking(booking_id)
 
     if not booking:
-        await query.answer("Booking not found.", show_alert=True)
+        await update.message.reply_text(f"No booking #{booking_id} found.")
         return
     if booking["creator_username"] != username:
-        await query.answer("You can only cancel your own bookings!", show_alert=True)
+        await update.message.reply_text("You can only cancel your own bookings!")
         return
 
     await delete_booking(booking_id)
-    await query.answer("Booking cancelled.")
 
     sh, sm = map(int, booking["start_time"].split(":"))
     eh, em = map(int, booking["end_time"].split(":"))
@@ -196,12 +192,7 @@ async def bookcancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             ),
             parse_mode="Markdown",
         )
-
-    try:
-        new_kb = remove_keyboard_row(query.message.reply_markup.inline_keyboard, booking_id)
-        await query.edit_message_reply_markup(InlineKeyboardMarkup(new_kb))
-    except Exception:
-        pass
+    await update.message.reply_text("Booking cancelled. The group has been notified.")
 
 
 async def book_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -212,7 +203,7 @@ async def book_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 booking_conv_handler = ConversationHandler(
     entry_points=[
         CommandHandler("book", book_start),
-        CallbackQueryHandler(bookedit_start, pattern=r"^bookedit_\d+$"),
+        MessageHandler(filters.Regex(r"(?i)^/editbooking\d+$"), editbooking_command),
     ],
     states={
         SPACE:      [CallbackQueryHandler(got_space,      pattern="^space_")],
