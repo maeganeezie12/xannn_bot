@@ -26,6 +26,7 @@ from utils import format_date, normalize_username, parse_date
 logger = logging.getLogger(__name__)
 
 DESTINATION, DEPART_DATE, RETURN_DATE, NOTES, COMPANIONS = range(5)
+EDIT_MENU, EDIT_DESTINATION, EDIT_DEPART, EDIT_RETURN, EDIT_NOTES = range(5, 10)
 
 
 async def travel_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,45 +73,20 @@ async def travel_return(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def travel_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["notes"] = update.message.text.strip()
-    if context.user_data.get("edit_trip_id"):
-        return await _finalize_trip_edit(update, context)
     return await _ask_companions(update, context)
 
 
 async def travel_skip_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["notes"] = None
-    if context.user_data.get("edit_trip_id"):
-        return await _finalize_trip_edit(update, context)
     return await _ask_companions(update, context)
 
 
-async def _finalize_trip_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    trip_id  = context.user_data["edit_trip_id"]
-    username = normalize_username(update.effective_user.username)
-
-    await update_trip(
-        trip_id,
-        context.user_data["destination"],
-        context.user_data["depart_date"],
-        context.user_data["return_date"],
-        context.user_data.get("notes"),
-    )
-
-    name = FAMILY.get(username, f"@{username}")
-    dest = context.user_data["destination"]
-    dep  = format_date(context.user_data["depart_date"])
-    ret  = format_date(context.user_data["return_date"])
-
-    await update.message.reply_text(f"Trip updated! ✈️ {dest}, {dep} → {ret}")
-
-    if GROUP_CHAT_ID:
-        await context.bot.send_message(
-            chat_id=GROUP_CHAT_ID,
-            text=f"✏️ *{name}* updated their trip: now heading to *{dest}*, {dep} → {ret}",
-            parse_mode="Markdown",
-        )
-
-    return ConversationHandler.END
+def _edit_menu_keyboard():
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📍 Destination", callback_data="editfield_destination"),
+        InlineKeyboardButton("📅 Dates",       callback_data="editfield_dates"),
+        InlineKeyboardButton("📝 Notes",       callback_data="editfield_notes"),
+    ]])
 
 
 async def edittrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -128,9 +104,103 @@ async def edittrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["edit_trip_id"] = trip_id
     await update.message.reply_text(
-        f"Editing trip #{trip_id}. Where are you going? (currently: {trip['destination']})"
+        f"Editing trip #{trip_id} to *{trip['destination']}*. What do you want to change?",
+        reply_markup=_edit_menu_keyboard(),
+        parse_mode="Markdown",
     )
-    return DESTINATION
+    return EDIT_MENU
+
+
+async def edit_menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    trip = await get_trip(context.user_data["edit_trip_id"])
+    field = query.data.split("_", 1)[1]
+
+    if field == "destination":
+        await query.edit_message_text(
+            f"Where are you going now? (currently: {trip['destination']})"
+        )
+        return EDIT_DESTINATION
+
+    if field == "dates":
+        await query.edit_message_text(
+            f"New departure date? (currently: {format_date(trip['depart_date'])})"
+        )
+        return EDIT_DEPART
+
+    notes_txt = trip["notes"] or "—"
+    await query.edit_message_text(
+        f"New notes? (currently: {notes_txt}) — or /skip to clear"
+    )
+    return EDIT_NOTES
+
+
+async def _apply_trip_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, **overrides):
+    trip_id = context.user_data["edit_trip_id"]
+    trip    = await get_trip(trip_id)
+
+    destination = overrides.get("destination", trip["destination"])
+    depart_date = overrides.get("depart_date", trip["depart_date"])
+    return_date = overrides.get("return_date", trip["return_date"])
+    notes       = overrides["notes"] if "notes" in overrides else trip["notes"]
+
+    await update_trip(trip_id, destination, depart_date, return_date, notes)
+
+    username = normalize_username(update.effective_user.username)
+    name = FAMILY.get(username, f"@{username}")
+    dep  = format_date(depart_date)
+    ret  = format_date(return_date)
+
+    await update.message.reply_text(f"Trip updated! ✈️ {destination}, {dep} → {ret}")
+
+    if GROUP_CHAT_ID:
+        await context.bot.send_message(
+            chat_id=GROUP_CHAT_ID,
+            text=f"✏️ *{name}* updated their trip: now heading to *{destination}*, {dep} → {ret}",
+            parse_mode="Markdown",
+        )
+
+    return ConversationHandler.END
+
+
+async def edit_destination_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _apply_trip_edit(update, context, destination=update.message.text.strip())
+
+
+async def edit_depart_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    d = parse_date(update.message.text)
+    if not d:
+        await update.message.reply_text("Couldn't read that date. Try: 5 Jul, 05/07, Saturday")
+        return EDIT_DEPART
+    context.user_data["new_depart_date"] = str(d)
+    await update.message.reply_text("New return date?")
+    return EDIT_RETURN
+
+
+async def edit_return_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    d = parse_date(update.message.text)
+    if not d:
+        await update.message.reply_text("Couldn't read that date. Try: 5 Jul, 05/07, Saturday")
+        return EDIT_RETURN
+    depart = date_type.fromisoformat(context.user_data["new_depart_date"])
+    if d < depart:
+        await update.message.reply_text("Return date must be on or after departure. Try again.")
+        return EDIT_RETURN
+    return await _apply_trip_edit(
+        update, context,
+        depart_date=context.user_data["new_depart_date"],
+        return_date=str(d),
+    )
+
+
+async def edit_notes_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _apply_trip_edit(update, context, notes=update.message.text.strip())
+
+
+async def edit_notes_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _apply_trip_edit(update, context, notes=None)
 
 
 async def canceltrip_text_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -404,6 +474,14 @@ travel_conv_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, travel_notes),
         ],
         COMPANIONS: [CallbackQueryHandler(travel_companions, pattern=r"^travelcomp_")],
+        EDIT_MENU: [CallbackQueryHandler(edit_menu_choice, pattern=r"^editfield_")],
+        EDIT_DESTINATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_destination_field)],
+        EDIT_DEPART: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_depart_field)],
+        EDIT_RETURN: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_return_field)],
+        EDIT_NOTES: [
+            CommandHandler("skip", edit_notes_skip),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, edit_notes_field),
+        ],
     },
     fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
     per_message=False,
