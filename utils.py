@@ -74,6 +74,8 @@ def parse_date(text: str):
 
     Accepts: today, tomorrow, Monday–Sunday (and abbreviations),
     DD/MM, DD/MM/YY, DD/MM/YYYY, '5 Jun', '5 June', 'June 5', '5th June'.
+    A year is optional in the '5 Jun' style too — '5 Jun 2027' or
+    'Jun 5 27' both work; if omitted, the current year is assumed.
     """
     text = text.strip().lower()
     # strip ordinal suffixes: 1st 2nd 3rd 4th …
@@ -107,20 +109,26 @@ def parse_date(text: str):
         except ValueError:
             return None
 
-    # "5 jun", "5 june", "june 5", "jun 5"
-    m = re.fullmatch(r"(\d{1,2})\s+([a-z]+)", text)
-    if not m:
-        m = re.fullmatch(r"([a-z]+)\s+(\d{1,2})", text)
-        if m:
-            m = type("M", (), {"group": lambda self, i: [None, m.group(2), m.group(1)][i]})()
+    # "5 jun", "5 june", "june 5", "jun 5" — with an optional trailing year
+    m = re.fullmatch(r"(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?", text)
     if m:
-        try:
-            day   = int(m.group(1))
-            month = _MONTHS.get(m.group(2))
-            if month:
-                return date(now_sgt().year, month, day)
-        except ValueError:
-            return None
+        day_str, month_str, year_str = m.group(1), m.group(2), m.group(3)
+    else:
+        m = re.fullmatch(r"([a-z]+)\s+(\d{1,2})(?:\s+(\d{2,4}))?", text)
+        day_str, month_str, year_str = (m.group(2), m.group(1), m.group(3)) if m else (None, None, None)
+
+    if day_str and month_str:
+        month = _MONTHS.get(month_str)
+        if month:
+            year = now_sgt().year
+            if year_str:
+                year = int(year_str)
+                if year < 100:
+                    year += 2000
+            try:
+                return date(year, month, int(day_str))
+            except ValueError:
+                return None
 
     return None
 
