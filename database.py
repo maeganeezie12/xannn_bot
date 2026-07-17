@@ -77,6 +77,11 @@ async def init_db():
                 PRIMARY KEY (trip_id, username),
                 FOREIGN KEY (trip_id) REFERENCES trips(id)
             );
+
+            CREATE TABLE IF NOT EXISTS user_chats (
+                username TEXT PRIMARY KEY,
+                chat_id INTEGER NOT NULL
+            );
         """)
         await db.commit()
 
@@ -355,6 +360,25 @@ async def get_trip_companions(trip_id):
             "SELECT * FROM trip_companions WHERE trip_id = ?", (trip_id,)
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
+
+
+# ── Private chat IDs (for DMing family members) ──────────────────────────────
+
+async def save_user_chat_id(username, chat_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO user_chats (username, chat_id) VALUES (?, ?)
+               ON CONFLICT(username) DO UPDATE SET chat_id = excluded.chat_id""",
+            (username, chat_id),
+        )
+        await db.commit()
+
+
+async def get_user_chat_id(username):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT chat_id FROM user_chats WHERE username = ?", (username,)) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
 
 
 # ── Muted reminders ───────────────────────────────────────────────────────────

@@ -148,19 +148,10 @@ async def _apply_trip_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, *
 
     await update_trip(trip_id, destination, depart_date, return_date, notes)
 
-    username = normalize_username(update.effective_user.username)
-    name = FAMILY.get(username, f"@{username}")
-    dep  = format_date(depart_date)
-    ret  = format_date(return_date)
+    dep = format_date(depart_date)
+    ret = format_date(return_date)
 
     await update.message.reply_text(f"Trip updated! ✈️ {destination}, {dep} → {ret}")
-
-    if GROUP_CHAT_ID:
-        await context.bot.send_message(
-            chat_id=GROUP_CHAT_ID,
-            text=f"✏️ *{name}* updated their trip: now heading to *{destination}*, {dep} → {ret}",
-            parse_mode="Markdown",
-        )
 
     return ConversationHandler.END
 

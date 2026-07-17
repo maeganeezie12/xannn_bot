@@ -11,6 +11,7 @@ from handlers.event import cancelevent_command, event_conv_handler
 from handlers.general import (
     attendance_callback_handler,
     cancel_booking_handler,
+    capture_private_chat,
     change_reminders_callback,
     close_poll_handler,
     events_handler,
@@ -109,6 +110,10 @@ def main():
     app.add_handler(CallbackQueryHandler(change_reminders_callback,   pattern=r"^chrem_"))
     app.add_handler(CallbackQueryHandler(jointrip_callback,           pattern=r"^jointrip_"))
     app.add_handler(CallbackQueryHandler(trips_filter_callback,       pattern=r"^trips_"))
+
+    # Runs alongside every other handler (separate group) to remember each
+    # family member's private chat ID the first time they DM the bot
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE, capture_private_chat), group=1)
 
     logger.info("XANNNBot starting...")
     app.run_polling(allowed_updates=["message", "callback_query"])

@@ -18,11 +18,22 @@ from database import (
     get_upcoming_events,
     get_weekend_bookings,
     mute_reminder,
+    save_user_chat_id,
     set_attendance,
     update_event_reminders,
 )
 from handlers.event import attendance_keyboard, build_event_card
 from utils import format_date, format_time, get_weekend_dates, normalize_username
+
+
+# ── Private chat capture (lets the bot DM family members later) ──────────────
+
+async def capture_private_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_chat or update.effective_chat.type != "private":
+        return
+    username = normalize_username(update.effective_user.username)
+    if username in FAMILY:
+        await save_user_chat_id(username, update.effective_chat.id)
 
 
 # ── /weekend ──────────────────────────────────────────────────────────────────
@@ -181,6 +192,9 @@ async def whoami_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "*XANNNBot* — Tay family planner 🏡\n\n"
+        "_Friday 5pm planning reminders now come as a private DM from me, not a group "
+        "blast — message me here at least once \\(anything works, even /start\\) so I "
+        "have a chat open with you\\._\n\n"
         "*📅 Plans*\n"
         "/plan — Share your plans for any day\n"
         "/cancelplan — Remove plans for a day\n"

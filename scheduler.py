@@ -13,16 +13,36 @@ SGT = pytz.timezone(TIMEZONE)
 
 
 async def _send_friday_prompt(bot):
-    mentions = " ".join(f"@{u}" for u in FAMILY)
-    text = (
-        "Hey Tay fam! 👋 It's Friday — what are your weekend plans?\n\n"
-        "Drop them with /plan so everyone knows what's up!\n\n"
-        f"Still need to share: {mentions}"
-    )
-    try:
-        await bot.send_message(chat_id=GROUP_CHAT_ID, text=text)
-    except Exception as e:
-        logger.error("Friday prompt failed: %s", e)
+    from database import get_user_chat_id
+
+    unreachable = []
+    for username, name in FAMILY.items():
+        chat_id = await get_user_chat_id(username)
+        if not chat_id:
+            unreachable.append(f"@{username}")
+            continue
+        text = (
+            f"Hey {name}! 👋 It's Friday — what are your weekend plans?\n\n"
+            "Drop them with /plan so everyone knows what's up!"
+        )
+        try:
+            await bot.send_message(chat_id=chat_id, text=text)
+        except Exception as e:
+            logger.error("Friday PM to %s failed: %s", username, e)
+            unreachable.append(f"@{username}")
+
+    if unreachable and GROUP_CHAT_ID:
+        try:
+            await bot.send_message(
+                chat_id=GROUP_CHAT_ID,
+                text=(
+                    "👋 " + ", ".join(unreachable) + " — I couldn't message you privately for "
+                    "the Friday planning reminder. Send me any DM (e.g. /start) once so I can "
+                    "reach you directly from now on!"
+                ),
+            )
+        except Exception as e:
+            logger.error("Friday prompt fallback failed: %s", e)
 
 
 async def _send_event_reminder(bot, event_id: int, event_name: str, label: str):
